@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Mac system files
+.DS_Store
+
+# Generated inventory files
+inventory/source/*
+inventory/target/*
+inventory/reports/*
+
+!inventory/source/.gitkeep
+!inventory/target/.gitkeep
+!inventory/reports/.gitkeep
+
+# Generated / exported flow files
+flows/source/contact-flows/*
+flows/source/contact-flow-modules/*
+flows/patched/contact-flows/*
+flows/patched/contact-flow-modules/*
+
+!flows/source/contact-flows/.gitkeep
+!flows/source/contact-flow-modules/.gitkeep
+!flows/patched/contact-flows/.gitkeep
+!flows/patched/contact-flow-modules/.gitkeep
+
+# Generated CloudFormation
+cfn/generated/*
+!cfn/generated/.gitkeep
+
+# Temporary files
+tmp/
+temp/
+.cache/

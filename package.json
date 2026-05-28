@@ -1,0 +1,46 @@
+{
+  "name": "connect-migration",
+  "version": "1.0",
+  "type": "module",
+  "private": true,
+  "description": "Script-based Amazon Connect migration framework.",
+  "scripts": {
+    "validate-profiles": "node scripts/00-validate-profiles.js",
+    "discover": "node scripts/01-discover-source.js && node scripts/02-discover-flow-dependencies.js && node scripts/03-classify-scope.js",
+    "generate-cfn": "node scripts/04-generate-cfn.js",
+    "deploy-base": "node scripts/05-deploy-target-base.js",
+    "map": "node scripts/06-build-resource-map.js",
+    "patch-flows": "node scripts/07-patch-flows.js",
+    "deploy-flows": "node scripts/08-deploy-flows.js",
+    "migrate-users": "node scripts/09-migrate-users.js",
+    "migrate-qc": "node scripts/10-migrate-quick-connects.js",
+    "optional-services": "node scripts/11-migrate-optional-services.js",
+    "validate-target": "node scripts/12-validate-target.js",
+    "report": "node scripts/13-generate-report.js",
+    "run-discovery": "npm run validate-profiles && npm run discover && npm run generate-cfn",
+    "run-deploy": "npm run deploy-base && npm run migrate-data-tables && npm run map && npm run patch-flows && npm run deploy-flows && npm run map && npm run migrate-users && npm run map && npm run migrate-qc && npm run optional-services",
+    "run-validate": "npm run validate-target && npm run report",
+    "run-all": "npm run run-discovery && npm run run-deploy && npm run run-validate",
+    "migrate-data-tables": "node scripts/11-migrate-data-tables.js",
+    "rollback-dry-run": "node scripts/99-rollback-target.js --dry-run",
+    "rollback": "cross-env ROLLBACK_CONFIRM=DELETE node scripts/99-rollback-target.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudformation": "latest",
+    "@aws-sdk/client-cloudwatch": "latest",
+    "@aws-sdk/client-connect": "latest",
+    "@aws-sdk/client-dynamodb": "latest",
+    "@aws-sdk/client-eventbridge": "latest",
+    "@aws-sdk/client-firehose": "latest",
+    "@aws-sdk/client-kinesis": "latest",
+    "@aws-sdk/client-lambda": "latest",
+    "@aws-sdk/client-s3": "latest",
+    "@aws-sdk/client-sts": "latest",
+    "@aws-sdk/credential-providers": "latest",
+    "fs-extra": "latest",
+    "yaml": "latest"
+  },
+  "devDependencies": {
+    "cross-env": "latest"
+  }
+}

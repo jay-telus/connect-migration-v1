@@ -1,0 +1,44 @@
+{
+  "region": "eu-central-1",
+  "sourceProfile": "src",
+  "destProfile": "dest",
+  "sourceInstanceArn": "arn:aws:connect:eu-central-1:<SOURCE_ACCOUNT_ID>:instance/<SOURCE_INSTANCE_ID>",
+  "destInstanceArn": "arn:aws:connect:ca-central-1:<DEST_ACCOUNT_ID>:instance/<DEST_INSTANCE_ID>",
+  "scope": {
+    "excludePhoneNumbers": true,
+    "excludeZendeskSideConfig": true,
+    "createDestInstance": false,
+    "migrateUsers": true,
+    "migrateQuickConnects": true,
+    "migrateAllFlowsDiscovered": true,
+    "migrateOptionalAwsServicesOnlyIfDiscovered": true,
+    "migrateDataTables": true
+  },
+  "flowTypes": [
+    "CONTACT_FLOW",
+    "CUSTOMER_QUEUE",
+    "CUSTOMER_HOLD",
+    "CUSTOMER_WHISPER",
+    "AGENT_HOLD",
+    "AGENT_WHISPER",
+    "OUTBOUND_WHISPER",
+    "AGENT_TRANSFER",
+    "QUEUE_TRANSFER",
+    "CAMPAIGN"
+  ],
+  "safety": {
+    "failIfSourceAccountIdRemainsInFlow": true,
+    "failIfDestDependencyMissing": true,
+    "doNotOverwriteSecurityProfileWithZeroPermissions": true
+  },
+  "skip": {
+    "queues": [
+      "BasicQueue"
+    ],
+    "quickConnectTypes": [
+      "PHONE_NUMBER"
+    ]
+  },
+  "sourceRegion": "eu-central-1",
+  "destRegion": "ca-central-1"
+}

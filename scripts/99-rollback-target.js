@@ -301,6 +301,23 @@ async function rollbackAgentStatuses() {
   }
 }
 
+
+async function rollbackHoursOfOperationOverrides() {
+  for (const o of baseDeploy.hoursOfOperationOverrides || []) {
+    const hoursId = o.hoursOfOperationId || o.HoursOfOperationId;
+    const overrideId = o.id || o.hoursOfOperationOverrideId || o.HoursOfOperationOverrideId;
+    if (!hoursId || !overrideId) continue;
+
+    await sendCommand(
+      "DeleteHoursOfOperationOverrideCommand",
+      { InstanceId, HoursOfOperationId: hoursId, HoursOfOperationOverrideId: overrideId },
+      `Delete hours of operation override ${createdName(o)}`,
+      { ignoreNotFound: true }
+    );
+    await sleep(200);
+  }
+}
+
 async function rollbackHoursOfOperation() {
   for (const h of baseDeploy.hoursOfOperations || []) {
     const id = h.id || h.hoursOfOperationId || h.HoursOfOperationId;
@@ -331,6 +348,7 @@ await rollbackPrompts();
 await rollbackCustomPredefinedAttributes();
 await rollbackSecurityProfiles();
 await rollbackAgentStatuses();
+await rollbackHoursOfOperationOverrides();
 await rollbackHoursOfOperation();
 
 result.completedAt = new Date().toISOString();

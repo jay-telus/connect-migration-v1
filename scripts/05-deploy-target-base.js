@@ -3,6 +3,8 @@ import {
   CreateQueueCommand,
   ListHoursOfOperationsCommand,
   CreateHoursOfOperationCommand,
+  ListHoursOfOperationOverridesCommand,
+  CreateHoursOfOperationOverrideCommand,
   ListPromptsCommand,
   CreatePromptCommand,
   ListSecurityProfilesCommand,
@@ -27,7 +29,7 @@ const srcInv = await readJson("inventory/source/source-inventory.json");
 const dest = connectClient(cfg.destProfile, cfg.destRegion);
 const InstanceId = cfg.destInstanceId;
 
-const created = { hoursOfOperations: [], prompts: [], queues: [], securityProfiles: [], agentStatuses: [], predefinedAttributes: [], routingProfiles: [], warnings: [] };
+const created = { hoursOfOperations: [], hoursOfOperationOverrides: [], prompts: [], queues: [], securityProfiles: [], agentStatuses: [], predefinedAttributes: [], routingProfiles: [], warnings: [] };
 
 function stripUndefined(obj) {
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined && v !== null));
@@ -108,6 +110,123 @@ function predefinedAttributeInput(attr) {
   return input;
 }
 
+function hoursOverrideKey(o) {
+  return [
+    o.Name || "",
+    o.EffectiveFrom || "",
+    o.EffectiveTill || "",
+    o.OverrideType || ""
+  ].join("|");
+}
+
+async function listTargetHoursOverrides(hoursOfOperationId, label) {
+  return paginate(
+    dest,
+    ListHoursOfOperationOverridesCommand,
+    { InstanceId, HoursOfOperationId: hoursOfOperationId, MaxResults: 100 },
+    "HoursOfOperationOverrideList"
+  ).catch((e) => {
+    created.warnings.push(`HoursOfOperation ${label}: list overrides failed: ${e.message}`);
+    return [];
+  });
+}
+
+function buildHoursOverrideInput(sourceOverride, targetHoursOfOperationId) {
+  return stripUndefined({
+    InstanceId,
+    HoursOfOperationId: targetHoursOfOperationId,
+    Name: sourceOverride.Name,
+    Description: sourceOverride.Description,
+    Config: sourceOverride.Config || [],
+    EffectiveFrom: sourceOverride.EffectiveFrom,
+    EffectiveTill: sourceOverride.EffectiveTill,
+    OverrideType: sourceOverride.OverrideType,
+    RecurrenceConfig: sourceOverride.RecurrenceConfig
+  });
+}
+
+async function createMissingHoursOverridesForSource(sourceHours, targetHours) {
+  const targetHoursId = targetHours?.Id || targetHours?.HoursOfOperationId;
+  if (!targetHoursId) return;
+
+  const sourceOverrides = sourceHours.Overrides || [];
+  if (sourceOverrides.length === 0) return;
+
+  const targetOverrides = await listTargetHoursOverrides(targetHoursId, sourceHours.Name);
+  const targetOverrideKeys = new Set((targetOverrides || []).map(hoursOverrideKey));
+
+  for (const override of sourceOverrides) {
+    if (!override?.Name) continue;
+    if (targetOverrideKeys.has(hoursOverrideKey(override))) continue;
+
+    const input = buildHoursOverrideInput(override, targetHoursId);
+
+    if (!input.Name || !input.EffectiveFrom || !input.EffectiveTill || !input.Config) {
+      created.warnings.push(`HoursOfOperation ${sourceHours.Name}: skipped override ${override.Name || "unknown"} because required fields were missing.`);
+      continue;
+    }
+
+    try {
+      const resp = await dest.send(new CreateHoursOfOperationOverrideCommand(input));
+      created.hoursOfOperationOverrides.push({
+        hoursName: sourceHours.Name,
+        name: override.Name,
+        id: resp.HoursOfOperationOverrideId,
+        hoursOfOperationId: targetHoursId
+      });
+      targetOverrideKeys.add(hoursOverrideKey(override));
+    } catch (e) {
+      const msg = String(e.message || "");
+      if (msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("already")) {
+        created.warnings.push(`HoursOfOperation ${sourceHours.Name}: override ${override.Name} already exists or duplicate.`);
+      } else {
+        created.warnings.push(`HoursOfOperation ${sourceHours.Name}: create override ${override.Name} failed: ${e.message}`);
+      }
+    }
+
+    await sleep(150);
+  }
+}
+
+function buildRoutingProfileQueueConfig(sourceConfig) {
+  const sourceQueueIdValue = sourceConfig.QueueId || sourceConfig.QueueReference?.QueueId;
+  const channel = sourceConfig.Channel || sourceConfig.QueueReference?.Channel;
+  const targetQueueId = targetQueueIdForSource(sourceQueueIdValue);
+
+  if (!targetQueueId || !channel) {
+    return {
+      warning: `source queue ${sourceQueueIdValue || "unknown"} because target queue or channel was missing`
+    };
+  }
+
+  return {
+    config: {
+      QueueReference: { QueueId: targetQueueId, Channel: channel },
+      Priority: sourceConfig.Priority ?? 1,
+      Delay: sourceConfig.Delay ?? 0
+    }
+  };
+}
+
+function buildManualAssignmentQueueConfig(sourceConfig) {
+  const sourceQueueIdValue = sourceConfig.QueueId || sourceConfig.QueueReference?.QueueId;
+  const channel = sourceConfig.Channel || sourceConfig.QueueReference?.Channel;
+  const targetQueueId = targetQueueIdForSource(sourceQueueIdValue);
+
+  if (!targetQueueId || !channel) {
+    return {
+      warning: `source manual queue ${sourceQueueIdValue || "unknown"} because target queue or channel was missing`
+    };
+  }
+
+  return {
+    config: {
+      QueueReference: { QueueId: targetQueueId, Channel: channel }
+    }
+  };
+}
+
+
 let targetHours = await listTargetHours();
 let targetHoursByName = new Map(targetHours.map((h) => [h.Name, h]));
 
@@ -139,6 +258,14 @@ for (const h of srcInv.hoursOfOperations || []) {
 
 targetHours = await listTargetHours();
 targetHoursByName = new Map(targetHours.map((h) => [h.Name, h]));
+
+for (const sourceHours of srcInv.hoursOfOperations || []) {
+  const targetHours = targetHoursByName.get(sourceHours.Name);
+  if (targetHours) {
+    await createMissingHoursOverridesForSource(sourceHours, targetHours);
+  }
+}
+
 const sourceHoursById = new Map((srcInv.hoursOfOperations || []).map((h) => [h.HoursOfOperationId || h.Id, h]));
 
 let targetPrompts = await listTargetPrompts();
@@ -228,7 +355,8 @@ for (const sp of srcInv.securityProfiles || []) {
       InstanceId,
       SecurityProfileName: sp.Name,
       Description: sp.Description || `Migrated security profile ${sp.Name}`,
-      Permissions: permissions
+      Permissions: permissions,
+      Tags: cleanTags(sp.Tags || {})
     }));
     created.securityProfiles.push({ name: sp.Name, id: resp.SecurityProfileId });
   } catch (e) {
@@ -350,7 +478,8 @@ for (const rp of srcInv.routingProfiles || []) {
       Description: rp.Description || `Migrated routing profile ${rp.Name}`,
       DefaultOutboundQueueId: defaultOutboundTargetQueueId,
       MediaConcurrencies: mediaConcurrencies,
-      Tags: rp.Tags || {}
+      AgentAvailabilityTimer: rp.AgentAvailabilityTimer,
+      Tags: cleanTags(rp.Tags || {})
     }));
 
     const targetRoutingProfileId = resp.RoutingProfileId;
@@ -358,18 +487,12 @@ for (const rp of srcInv.routingProfiles || []) {
 
     const queueConfigs = [];
     for (const qc of rp.QueueConfigs || []) {
-      const sqid = qc.QueueId || qc.QueueReference?.QueueId;
-      const channel = qc.Channel || qc.QueueReference?.Channel;
-      const tqid = targetQueueIdForSource(sqid);
-      if (!tqid || !channel) {
-        created.warnings.push(`RoutingProfile ${rp.Name}: skipped queue config for source queue ${sqid || "unknown"} because target queue or channel was missing.`);
+      const built = buildRoutingProfileQueueConfig(qc);
+      if (built.warning) {
+        created.warnings.push(`RoutingProfile ${rp.Name}: skipped queue config for ${built.warning}.`);
         continue;
       }
-      queueConfigs.push({
-        QueueReference: { QueueId: tqid, Channel: channel },
-        Priority: qc.Priority ?? 1,
-        Delay: qc.Delay ?? 0
-      });
+      queueConfigs.push(built.config);
     }
 
     for (const batch of chunk(queueConfigs, 10)) {
@@ -379,6 +502,26 @@ for (const rp of srcInv.routingProfiles || []) {
         RoutingProfileId: targetRoutingProfileId,
         QueueConfigs: batch
       })).catch((e) => created.warnings.push(`RoutingProfile ${rp.Name}: associate queues failed: ${e.message}`));
+      await sleep(200);
+    }
+
+    const manualAssignmentQueueConfigs = [];
+    for (const mc of rp.ManualAssignmentQueueConfigs || []) {
+      const built = buildManualAssignmentQueueConfig(mc);
+      if (built.warning) {
+        created.warnings.push(`RoutingProfile ${rp.Name}: skipped manual assignment queue config for ${built.warning}.`);
+        continue;
+      }
+      manualAssignmentQueueConfigs.push(built.config);
+    }
+
+    for (const batch of chunk(manualAssignmentQueueConfigs, 10)) {
+      if (batch.length === 0) continue;
+      await dest.send(new AssociateRoutingProfileQueuesCommand({
+        InstanceId,
+        RoutingProfileId: targetRoutingProfileId,
+        ManualAssignmentQueueConfigs: batch
+      })).catch((e) => created.warnings.push(`RoutingProfile ${rp.Name}: associate manual assignment queues failed: ${e.message}`));
       await sleep(200);
     }
   } catch (e) {

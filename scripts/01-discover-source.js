@@ -5,6 +5,7 @@ import {
   ListRoutingProfilesCommand,
   DescribeRoutingProfileCommand,
   ListRoutingProfileQueuesCommand,
+  ListRoutingProfileManualAssignmentQueuesCommand,
   ListSecurityProfilesCommand,
   ListSecurityProfilePermissionsCommand,
   ListUsersCommand,
@@ -12,6 +13,8 @@ import {
   ListUserHierarchyGroupsCommand,
   ListHoursOfOperationsCommand,
   DescribeHoursOfOperationCommand,
+  ListHoursOfOperationOverridesCommand,
+  DescribeHoursOfOperationOverrideCommand,
   ListPromptsCommand,
   DescribePromptCommand,
   ListContactFlowsCommand,
@@ -66,7 +69,40 @@ const hoursRaw = await paginate(connect, ListHoursOfOperationsCommand, { Instanc
 const hoursOfOperations = [];
 for (const h of hoursRaw) {
   const d = await safeDescribe(`DescribeHoursOfOperation ${h.Name}`, () => connect.send(new DescribeHoursOfOperationCommand({ InstanceId, HoursOfOperationId: h.Id })));
-  if (d?.HoursOfOperation) hoursOfOperations.push(d.HoursOfOperation);
+  if (d?.HoursOfOperation) {
+    const hoursRecord = d.HoursOfOperation;
+    const hoursId = hoursRecord.HoursOfOperationId || hoursRecord.Id || h.Id;
+
+    const overridesRaw = await paginate(
+      connect,
+      ListHoursOfOperationOverridesCommand,
+      { InstanceId, HoursOfOperationId: hoursId, MaxResults: 100 },
+      "HoursOfOperationOverrideList"
+    ).catch((e) => {
+      console.warn(`WARN: ListHoursOfOperationOverrides ${h.Name} failed: ${e.name || e.message}`);
+      return [];
+    });
+
+    const overrides = [];
+    for (const o of overridesRaw || []) {
+      const overrideId = o.HoursOfOperationOverrideId || o.Id;
+      const describedOverride = overrideId
+        ? await safeDescribe(`DescribeHoursOfOperationOverride ${h.Name}/${o.Name}`, () =>
+            connect.send(new DescribeHoursOfOperationOverrideCommand({
+              InstanceId,
+              HoursOfOperationId: hoursId,
+              HoursOfOperationOverrideId: overrideId
+            }))
+          )
+        : null;
+
+      overrides.push(describedOverride?.HoursOfOperationOverride || o);
+      await sleep(50);
+    }
+
+    hoursRecord.Overrides = overrides;
+    hoursOfOperations.push(hoursRecord);
+  }
 }
 await writeJson("inventory/source/hours-of-operation.json", hoursOfOperations);
 
@@ -130,7 +166,23 @@ for (const rp of routingProfilesRaw) {
     queueConfigs.push(...(page.RoutingProfileQueueConfigSummaryList || []));
     token = page.NextToken;
   } while (token);
-  routingProfiles.push({ ...(d?.RoutingProfile || rp), QueueConfigs: queueConfigs });
+
+  const manualAssignmentQueueConfigs = [];
+  token = undefined;
+  do {
+    const page = await safeDescribe(`ListRoutingProfileManualAssignmentQueues ${rp.Name}`, () =>
+      connect.send(new ListRoutingProfileManualAssignmentQueuesCommand({ InstanceId, RoutingProfileId: rp.Id, MaxResults: 100, NextToken: token }))
+    );
+    if (!page) break;
+    manualAssignmentQueueConfigs.push(...(page.RoutingProfileQueueConfigSummaryList || page.RoutingProfileManualAssignmentQueueConfigSummaryList || []));
+    token = page.NextToken;
+  } while (token);
+
+  routingProfiles.push({
+    ...(d?.RoutingProfile || rp),
+    QueueConfigs: queueConfigs,
+    ManualAssignmentQueueConfigs: manualAssignmentQueueConfigs
+  });
 }
 await writeJson("inventory/source/routing-profiles.json", routingProfiles);
 

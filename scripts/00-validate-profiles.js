@@ -10,7 +10,7 @@ async function who(profile, region) {
 
 const cfg = await loadConfig();
 
-for (const profile of ["default", cfg.sourceProfile, cfg.destProfile]) {
+for (const profile of ["base", cfg.sourceProfile, cfg.destProfile]) {
   const region = profile === cfg.destProfile ? cfg.destRegion : cfg.sourceRegion;
   const identity = await who(profile, region);
   console.log(`${profile}: ${identity.Arn} (${identity.Account})`);
